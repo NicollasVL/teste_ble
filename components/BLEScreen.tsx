@@ -37,15 +37,55 @@ export default function BLEScreen() {
 
   const handleConnect = async (device: any) => {
     try {
-      await connectToDevice(device);
-      Alert.alert("Success", `Connected to ${device.name || device.id}`);
+      console.log("🔵 Attempting to connect to:", device.name, device.id);
+      const connectedDev = await connectToDevice(device);
+      console.log("✅ Connected successfully!");
       
-      // Get services after connection
-      const deviceServices = await getServicesAndCharacteristics();
-      setServices(deviceServices);
-    } catch (error) {
-      Alert.alert("Error", "Failed to connect to device");
-      console.error(error);
+      // Wait longer for the device to be fully ready (especially for audio devices)
+      console.log("⏳ Waiting for device to be ready...");
+      await new Promise(resolve => setTimeout(resolve, 3000));
+      
+      // Try to get services multiple times if needed
+      let deviceServices: any[] = [];
+      let attempts = 0;
+      const maxAttempts = 3;
+      
+      while (attempts < maxAttempts && deviceServices.length === 0) {
+        attempts++;
+        try {
+          console.log(`🔍 Discovering services (attempt ${attempts}/${maxAttempts})...`);
+          deviceServices = await getServicesAndCharacteristics();
+          console.log("📋 Services found:", deviceServices.length);
+          
+          if (deviceServices.length === 0 && attempts < maxAttempts) {
+            console.log("⏳ No services found, waiting 2s before retry...");
+            await new Promise(resolve => setTimeout(resolve, 2000));
+          }
+        } catch (serviceError: any) {
+          console.error(`❌ Attempt ${attempts} failed:`, serviceError.message);
+          if (attempts < maxAttempts) {
+            await new Promise(resolve => setTimeout(resolve, 2000));
+          }
+        }
+      }
+      
+      if (deviceServices.length > 0) {
+        console.log("Services details:", JSON.stringify(deviceServices, null, 2));
+        setServices(deviceServices);
+        Alert.alert(
+          "Success", 
+          `Connected to ${device.name || device.id}\n\nFound ${deviceServices.length} service(s)`
+        );
+      } else {
+        setServices([]);
+        Alert.alert(
+          "Connected", 
+          `Connected to ${device.name || device.id}\n\nNo services discovered yet. Try the Refresh button.`
+        );
+      }
+    } catch (error: any) {
+      console.error("❌ Connection failed:", error);
+      Alert.alert("Error", `Failed to connect: ${error.message || "Unknown error"}`);
     }
   };
 
@@ -140,19 +180,60 @@ export default function BLEScreen() {
           <Text style={styles.connectedDeviceName}>
             {connectedDevice.name || connectedDevice.id}
           </Text>
-          <TouchableOpacity
-            style={styles.disconnectButton}
-            onPress={handleDisconnect}
-          >
-            <Text style={styles.disconnectButtonText}>Disconnect</Text>
-          </TouchableOpacity>
+          <View style={styles.buttonRow}>
+            <TouchableOpacity
+              style={styles.disconnectButton}
+              onPress={handleDisconnect}
+            >
+              <Text style={styles.disconnectButtonText}>Disconnect</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity
+              style={styles.refreshButton}
+              onPress={async () => {
+                try {
+                  console.log("🔄 Refreshing services with force rediscovery...");
+                  const deviceServices = await getServicesAndCharacteristics(true);
+                  setServices(deviceServices);
+                  Alert.alert(
+                    "Refreshed", 
+                    deviceServices.length > 0 
+                      ? `Found ${deviceServices.length} service(s)` 
+                      : "No services found"
+                  );
+                } catch (error: any) {
+                  console.error("Refresh error:", error);
+                  Alert.alert("Error", `Failed to refresh: ${error.message}`);
+                }
+              }}
+            >
+              <Text style={styles.refreshButtonText}>🔄 Refresh</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Services Info */}
+          <Text style={styles.servicesCount}>
+            Services found: {services.length}
+          </Text>
 
           {/* Services List */}
-          {services.length > 0 && (
+          {services.length > 0 ? (
             <ScrollView style={styles.servicesScrollView}>
               <Text style={styles.servicesTitle}>Services & Characteristics:</Text>
               {services.map(renderService)}
             </ScrollView>
+          ) : (
+            <View style={styles.noServicesContainer}>
+              <Text style={styles.noServicesText}>
+                ⚠️ No BLE services found
+              </Text>
+              <Text style={styles.noServicesSubtext}>
+                This device may be using Bluetooth Classic for audio.
+              </Text>
+              <Text style={styles.noServicesSubtext}>
+                Try the Refresh button or check AUDIO_BLE_INFO.md for more info.
+              </Text>
+            </View>
           )}
         </View>
       )}
@@ -251,7 +332,13 @@ const styles = StyleSheet.create({
     color: "#2196F3",
     marginBottom: 12,
   },
+  buttonRow: {
+    flexDirection: "row",
+    gap: 8,
+    marginBottom: 12,
+  },
   disconnectButton: {
+    flex: 1,
     backgroundColor: "#F44336",
     padding: 12,
     borderRadius: 8,
@@ -262,9 +349,45 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     fontSize: 16,
   },
+  refreshButton: {
+    flex: 1,
+    backgroundColor: "#2196F3",
+    padding: 12,
+    borderRadius: 8,
+    alignItems: "center",
+  },
+  refreshButtonText: {
+    color: "#fff",
+    fontWeight: "600",
+    fontSize: 16,
+  },
+  servicesCount: {
+    fontSize: 14,
+    color: "#666",
+    marginBottom: 8,
+    fontWeight: "500",
+  },
   servicesScrollView: {
     marginTop: 16,
     maxHeight: 300,
+  },
+  noServicesContainer: {
+    alignItems: "center",
+    padding: 20,
+    marginTop: 16,
+  },
+  noServicesText: {
+    fontSize: 16,
+    color: "#FF9800",
+    fontWeight: "600",
+    marginBottom: 8,
+    textAlign: "center",
+  },
+  noServicesSubtext: {
+    fontSize: 12,
+    color: "#666",
+    textAlign: "center",
+    marginTop: 4,
   },
   servicesTitle: {
     fontSize: 16,

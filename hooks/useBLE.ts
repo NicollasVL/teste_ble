@@ -150,9 +150,19 @@ function useBLE() {
   // Connect to a device
   const connectToDevice = async (device: BLEDevice) => {
     try {
-      const deviceConnection = await bleManager.connectToDevice(device.id);
+      console.log("🔌 Connecting to device:", device.id);
+      const deviceConnection = await bleManager.connectToDevice(device.id, {
+        requestMTU: 517, // Request larger MTU for better performance
+      });
+      console.log("✓ Device connected");
+      
       setConnectedDevice(deviceConnection);
+      
+      console.log("🔍 Discovering services and characteristics...");
+      // Add a small delay before discovery to ensure device is ready
+      await new Promise(resolve => setTimeout(resolve, 500));
       await deviceConnection.discoverAllServicesAndCharacteristics();
+      console.log("✓ Discovery complete");
       
       // Monitor disconnection
       bleManager.onDeviceDisconnected(device.id, (error, disconnectedDevice) => {
@@ -165,7 +175,7 @@ function useBLE() {
 
       return deviceConnection;
     } catch (error) {
-      console.error("Connection error:", error);
+      console.error("❌ Connection error:", error);
       throw error;
     }
   };
@@ -263,31 +273,63 @@ function useBLE() {
   };
 
   // Get services and characteristics of connected device
-  const getServicesAndCharacteristics = async () => {
+  const getServicesAndCharacteristics = async (forceRediscover = false) => {
     if (!connectedDevice) {
       throw new Error("No device connected");
     }
 
     try {
+      console.log("📡 Checking device connection status...");
+      // Check if device is still connected
+      const isConnected = await connectedDevice.isConnected();
+      console.log("Connection status:", isConnected);
+      
+      if (!isConnected) {
+        throw new Error("Device is not connected anymore");
+      }
+
+      // If force rediscover, do it again
+      if (forceRediscover) {
+        console.log("🔄 Forcing service rediscovery...");
+        await connectedDevice.discoverAllServicesAndCharacteristics();
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+
+      console.log("📋 Fetching services...");
       const services = await connectedDevice.services();
+      console.log(`Found ${services.length} service(s)`);
+      
+      if (services.length === 0) {
+        console.warn("⚠️ No BLE services found on this device");
+        return [];
+      }
+
       const servicesWithCharacteristics = await Promise.all(
         services.map(async (service) => {
+          console.log(`  Service UUID: ${service.uuid}`);
           const characteristics = await service.characteristics();
+          console.log(`    - ${characteristics.length} characteristic(s)`);
+          
           return {
             uuid: service.uuid,
-            characteristics: characteristics.map((char) => ({
-              uuid: char.uuid,
-              isReadable: char.isReadable,
-              isWritableWithResponse: char.isWritableWithResponse,
-              isWritableWithoutResponse: char.isWritableWithoutResponse,
-              isNotifiable: char.isNotifiable,
-            })),
+            characteristics: characteristics.map((char) => {
+              console.log(`      Char UUID: ${char.uuid}`);
+              return {
+                uuid: char.uuid,
+                isReadable: char.isReadable,
+                isWritableWithResponse: char.isWritableWithResponse,
+                isWritableWithoutResponse: char.isWritableWithoutResponse,
+                isNotifiable: char.isNotifiable,
+              };
+            }),
           };
         })
       );
+      
+      console.log("✅ Services discovery complete");
       return servicesWithCharacteristics;
     } catch (error) {
-      console.error("Get services error:", error);
+      console.error("❌ Get services error:", error);
       throw error;
     }
   };
