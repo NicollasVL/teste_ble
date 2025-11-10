@@ -12,6 +12,7 @@ import {
 import useBLE from "@/hooks/useBLE";
 import { State } from "react-native-ble-plx";
 import { CharacteristicTest } from "./CharacteristicTest";
+import { PTorkControlPanel } from "./PTorkControlPanel";
 
 export default function BLEScreen() {
   const {
@@ -54,6 +55,11 @@ export default function BLEScreen() {
       }
       
       console.log("✅ Connected successfully!");
+      console.log("📱 Device info:", {
+        name: connectedDev.name,
+        id: connectedDev.id,
+        isPTork: (connectedDev.name || '').includes('TORK')
+      });
       
       // Wait longer for the device to be fully ready (especially for audio devices)
       console.log("⏳ Waiting for device to be ready...");
@@ -228,29 +234,59 @@ export default function BLEScreen() {
             </TouchableOpacity>
           </View>
 
-          {/* Services Info */}
-          <Text style={styles.servicesCount}>
-            Services found: {services.length}
-          </Text>
+          {/* P TORK Control Panel - SEMPRE MOSTRA PARA TESTE */}
+          <View style={styles.controlPanelContainer}>
+            <Text style={styles.controlPanelTitle}>🎮 Painel de Controle P TORK</Text>
+            <Text style={{padding: 10, color: '#666'}}>
+              Device: {connectedDevice.name || 'Sem nome'} | 
+              ID: {connectedDevice.id.substring(0, 8)}...
+            </Text>
+            <PTorkControlPanel
+              device={connectedDevice}
+              onRead={readCharacteristic}
+              onWrite={writeCharacteristic}
+              onSubscribe={subscribeToCharacteristic}
+            />
+          </View>
 
-          {/* Services List */}
-          {services.length > 0 ? (
-            <ScrollView style={styles.servicesScrollView}>
-              <Text style={styles.servicesTitle}>Services & Characteristics:</Text>
-              {services.map((service, index) => renderService(service, index))}
-            </ScrollView>
-          ) : (
-            <View style={styles.noServicesContainer}>
-              <Text style={styles.noServicesText}>
-                ⚠️ No BLE services found
+          {/* Services List - Sempre mostra também */}
+          {(() => {
+            const deviceName = connectedDevice.name || '';
+            const isPTork = deviceName.includes('P TORK') || deviceName.includes('TORK');
+            console.log('🎮 Check P TORK:', { 
+              deviceName, 
+              isPTork,
+              includes_P_TORK: deviceName.includes('P TORK'),
+              includes_TORK: deviceName.includes('TORK')
+            });
+            return isPTork;
+          })() ? null : (
+            <>
+              {/* Services Info */}
+              <Text style={styles.servicesCount}>
+                Services found: {services.length}
               </Text>
-              <Text style={styles.noServicesSubtext}>
-                This device may be using Bluetooth Classic for audio.
-              </Text>
-              <Text style={styles.noServicesSubtext}>
-                Try the Refresh button or check AUDIO_BLE_INFO.md for more info.
-              </Text>
-            </View>
+
+              {/* Services List */}
+              {services.length > 0 ? (
+                <ScrollView style={styles.servicesScrollView}>
+                  <Text style={styles.servicesTitle}>Services & Characteristics:</Text>
+                  {services.map((service, index) => renderService(service, index))}
+                </ScrollView>
+              ) : (
+                <View style={styles.noServicesContainer}>
+                  <Text style={styles.noServicesText}>
+                    ⚠️ No BLE services found
+                  </Text>
+                  <Text style={styles.noServicesSubtext}>
+                    This device may be using Bluetooth Classic for audio.
+                  </Text>
+                  <Text style={styles.noServicesSubtext}>
+                    Try the Refresh button or check AUDIO_BLE_INFO.md for more info.
+                  </Text>
+                </View>
+              )}
+            </>
           )}
         </View>
       )}
@@ -517,5 +553,18 @@ const styles = StyleSheet.create({
     color: "#999",
     fontSize: 14,
     marginTop: 32,
+  },
+  controlPanelContainer: {
+    marginTop: 20,
+    backgroundColor: "#fff",
+    borderRadius: 10,
+    padding: 15,
+  },
+  controlPanelTitle: {
+    fontSize: 20,
+    fontWeight: "bold",
+    color: "#333",
+    marginBottom: 15,
+    textAlign: "center",
   },
 });
