@@ -1,0 +1,664 @@
+import { useState, useEffect } from "react";import React, { useState } from 'react';
+
+import { PermissionsAndroid, Platform } from "react-native";import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, Alert } from 'react-native';
+
+import { BleManager, Device, State, Subscription } from "react-native-ble-plx";import { Subscription } from 'react-native-ble-plx';
+
+import * as ExpoDevice from "expo-device";import { useBLE } from './path-to-your-useBLE-hook'; // Adjust the import based on your file structure
+
+import { Buffer } from "buffer";import { CharacteristicTest } from './CharacteristicTest';
+
+
+
+// BLE Device interfaceinterface CharacteristicTestProps {
+
+interface BLEDevice {  serviceUUID: string;
+
+  id: string;  characteristicUUID: string;
+
+  name: string | null;  isReadable: boolean;
+
+  rssi: number | null;  isWritable: boolean;
+
+}  isNotifiable: boolean;
+
+  onRead: (serviceUUID: string, charUUID: string) => Promise<string>;
+
+// Characteristic Info interface  onWrite: (serviceUUID: string, charUUID: string, value: string) => Promise<void>;
+
+interface CharacteristicInfo {  onSubscribe: (serviceUUID: string, charUUID: string, callback: (value: string) => void) => Promise<Subscription>;
+
+  uuid: string;}
+
+  isReadable: boolean;
+
+  isWritableWithResponse: boolean;export const CharacteristicTest: React.FC<CharacteristicTestProps> = ({
+
+  isWritableWithoutResponse: boolean;  serviceUUID,
+
+  isNotifiable: boolean;  characteristicUUID,
+
+  isIndicatable: boolean;  isReadable,
+
+}  isWritable,
+
+  isNotifiable,
+
+// Service Info interface  onRead,
+
+interface ServiceInfo {  onWrite,
+
+  uuid: string;  onSubscribe,
+
+  characteristics: CharacteristicInfo[];}) => {
+
+}  const [readValue, setReadValue] = useState<string>('');
+
+  const [writeValue, setWriteValue] = useState<string>('');
+
+const bleManager = new BleManager();  const [notifications, setNotifications] = useState<string[]>([]);
+
+  const [subscription, setSubscription] = useState<Subscription | null>(null);
+
+function useBLE() {  const [isSubscribed, setIsSubscribed] = useState(false);
+
+  const [allDevices, setAllDevices] = useState<BLEDevice[]>([]);  const { connectedDevice } = useBLE(); // Access the connected device from the hook
+
+  const [connectedDevice, setConnectedDevice] = useState<Device | null>(null);
+
+  const [isScanning, setIsScanning] = useState(false);  // 📖 LEITURA
+
+  const [bluetoothState, setBluetoothState] = useState<State>(State.Unknown);  const handleRead = async () => {
+
+    try {
+
+  // Monitor Bluetooth state      const value = await onRead(serviceUUID, characteristicUUID);
+
+  useEffect(() => {      setReadValue(value);
+
+    const subscription = bleManager.onStateChange((state) => {      Alert.alert('Success', `Read value: ${value}`);
+
+      setBluetoothState(state);    } catch (error) {
+
+      if (state === State.PoweredOn) {      Alert.alert('Error', 'Failed to read characteristic');
+
+        subscription.remove();      console.error(error);
+
+      }    }
+
+    }, true);  };
+
+
+
+    return () => {  // ✍️ ESCRITA
+
+      subscription.remove();  const handleWrite = async () => {
+
+    };    if (!writeValue.trim()) {
+
+  }, []);      Alert.alert('Error', 'Please enter a value to write');
+
+      return;
+
+  // Request Android 31+ permissions    }
+
+  const requestAndroid31Permissions = async () => {
+
+    const bluetoothScanPermission = await PermissionsAndroid.request(    try {
+
+      PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN,      await onWrite(serviceUUID, characteristicUUID, writeValue);
+
+      {      Alert.alert('Success', 'Value written successfully');
+
+        title: "Bluetooth Scan Permission",      setWriteValue('');
+
+        message: "App needs Bluetooth Scan permission",    } catch (error) {
+
+        buttonPositive: "OK",      Alert.alert('Error', 'Failed to write characteristic');
+
+      }      console.error(error);
+
+    );    }
+
+    const bluetoothConnectPermission = await PermissionsAndroid.request(  };
+
+      PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT,
+
+      {  // 🔔 NOTIFICAÇÕES
+
+        title: "Bluetooth Connect Permission",  const handleSubscribe = async () => {
+
+        message: "App needs Bluetooth Connect permission",    try {
+
+        buttonPositive: "OK",      const sub = await onSubscribe(serviceUUID, characteristicUUID, (value) => {
+
+      }        setNotifications(prev => [...prev, `${new Date().toLocaleTimeString()}: ${value}`]);
+
+    );      });
+
+    const fineLocationPermission = await PermissionsAndroid.request(      setSubscription(sub);
+
+      PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,      setIsSubscribed(true);
+
+      {      Alert.alert('Success', 'Subscribed to notifications');
+
+        title: "Location Permission",    } catch (error) {
+
+        message: "Bluetooth Low Energy requires Location",      Alert.alert('Error', 'Failed to subscribe');
+
+        buttonPositive: "OK",      console.error(error);
+
+      }    }
+
+    );  };
+
+
+
+    return (  const handleUnsubscribe = () => {
+
+      bluetoothScanPermission === "granted" &&    if (subscription) {
+
+      bluetoothConnectPermission === "granted" &&      subscription.remove();
+
+      fineLocationPermission === "granted"      setSubscription(null);
+
+    );      setIsSubscribed(false);
+
+  };      Alert.alert('Success', 'Unsubscribed from notifications');
+
+    }
+
+  // Request permissions based on platform  };
+
+  const requestPermissions = async () => {
+
+    if (Platform.OS === "android") {  return (
+
+      if ((ExpoDevice.platformApiLevel ?? -1) < 31) {    <View style={styles.container}>
+
+        const granted = await PermissionsAndroid.request(      <Text style={styles.uuid}>UUID: {characteristicUUID}</Text>
+
+          PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
+
+          {      {/* 📖 READ */}
+
+            title: "Location Permission",      {isReadable && (
+
+            message: "Bluetooth Low Energy requires Location",        <View style={styles.section}>
+
+            buttonPositive: "OK",          <Text style={styles.sectionTitle}>📖 Read</Text>
+
+          }          <TouchableOpacity style={styles.button} onPress={handleRead}>
+
+        );            <Text style={styles.buttonText}>Read Value</Text>
+
+        return granted === PermissionsAndroid.RESULTS.GRANTED;          </TouchableOpacity>
+
+      } else {          {readValue && (
+
+        const isAndroid31PermissionsGranted =            <Text style={styles.value}>Value: {readValue}</Text>
+
+          await requestAndroid31Permissions();          )}
+
+        return isAndroid31PermissionsGranted;        </View>
+
+      }      )}
+
+    } else {
+
+      return true;      {/* ✍️ WRITE */}
+
+    }      {isWritable && (
+
+  };        <View style={styles.section}>
+
+          <Text style={styles.sectionTitle}>✍️ Write</Text>
+
+  // Check if device already exists in list          <TextInput
+
+  const isDuplicateDevice = (devices: BLEDevice[], nextDevice: Device) => {            style={styles.input}
+
+    return devices.findIndex((device) => nextDevice.id === device.id) > -1;            placeholder="Enter value to write"
+
+  };            value={writeValue}
+
+            onChangeText={setWriteValue}
+
+  // Scan for BLE devices          />
+
+  const scanForDevices = async () => {          <TouchableOpacity style={styles.button} onPress={handleWrite}>
+
+    const hasPermissions = await requestPermissions();            <Text style={styles.buttonText}>Write Value</Text>
+
+    if (!hasPermissions) {          </TouchableOpacity>
+
+      console.log("Permissions not granted");        </View>
+
+      return;      )}
+
+    }
+
+      {/* 🔔 NOTIFY */}
+
+    if (bluetoothState !== State.PoweredOn) {      {isNotifiable && (
+
+      console.log("Bluetooth is not powered on");        <View style={styles.section}>
+
+      return;          <Text style={styles.sectionTitle}>🔔 Notifications</Text>
+
+    }          <TouchableOpacity
+
+            style={[styles.button, isSubscribed && styles.buttonActive]}
+
+    setIsScanning(true);            onPress={isSubscribed ? handleUnsubscribe : handleSubscribe}
+
+    setAllDevices([]);          >
+
+            <Text style={styles.buttonText}>
+
+    bleManager.startDeviceScan(null, null, (error, device) => {              {isSubscribed ? 'Unsubscribe' : 'Subscribe'}
+
+      if (error) {            </Text>
+
+        console.error("Scan error:", error);          </TouchableOpacity>
+
+        setIsScanning(false);          {notifications.length > 0 && (
+
+        return;            <ScrollView style={styles.notificationList}>
+
+      }              {notifications.map((notif, index) => (
+
+                <Text key={index} style={styles.notification}>{notif}</Text>
+
+      if (device) {              ))}
+
+        setAllDevices((prevState) => {            </ScrollView>
+
+          if (!isDuplicateDevice(prevState, device)) {          )}
+
+            return [        </View>
+
+              ...prevState,      )}
+
+              {
+
+                id: device.id,      {!isReadable && !isWritable && !isNotifiable && (
+
+                name: device.name,        <Text style={styles.noOps}>No operations available</Text>
+
+                rssi: device.rssi,      )}
+
+              },    </View>
+
+            ];  );
+
+          }};
+
+          return prevState;
+
+        });const styles = StyleSheet.create({
+
+      }  container: {
+
+    });    padding: 15,
+
+    backgroundColor: '#f5f5f5',
+
+    // Stop scanning after 10 seconds    borderRadius: 8,
+
+    setTimeout(() => {    marginVertical: 8,
+
+      stopScanning();  },
+
+    }, 10000);  uuid: {
+
+  };    fontSize: 12,
+
+    color: '#666',
+
+  // Stop scanning    marginBottom: 10,
+
+  const stopScanning = () => {    fontFamily: 'monospace',
+
+    bleManager.stopDeviceScan();  },
+
+    setIsScanning(false);  section: {
+
+  };    marginVertical: 10,
+
+  },
+
+  // Connect to a device  sectionTitle: {
+
+  const connectToDevice = async (device: BLEDevice) => {    fontSize: 16,
+
+    try {    fontWeight: 'bold',
+
+      console.log("🔌 Connecting to device:", device.id);    marginBottom: 8,
+
+      const deviceConnection = await bleManager.connectToDevice(device.id, {  },
+
+        requestMTU: 517, // Request larger MTU for better performance  button: {
+
+      });    backgroundColor: '#007AFF',
+
+      console.log("✓ Device connected");    padding: 12,
+
+          borderRadius: 6,
+
+      setConnectedDevice(deviceConnection);    alignItems: 'center',
+
+        },
+
+      console.log("🔍 Discovering services and characteristics...");  buttonActive: {
+
+      // Add a small delay before discovery to ensure device is ready    backgroundColor: '#FF3B30',
+
+      await new Promise(resolve => setTimeout(resolve, 500));  },
+
+      await deviceConnection.discoverAllServicesAndCharacteristics();  buttonText: {
+
+      console.log("✓ Discovery complete");    color: 'white',
+
+          fontWeight: '600',
+
+      // Monitor disconnection  },
+
+      bleManager.onDeviceDisconnected(device.id, (error, disconnectedDevice) => {  input: {
+
+        if (error) {    backgroundColor: 'white',
+
+          console.error("Disconnection error:", error);    padding: 12,
+
+        }    borderRadius: 6,
+
+        console.log("Device disconnected:", disconnectedDevice?.name);    borderWidth: 1,
+
+        setConnectedDevice(null);    borderColor: '#ddd',
+
+      });    marginBottom: 8,
+
+  },
+
+      return deviceConnection;  value: {
+
+    } catch (error) {    marginTop: 8,
+
+      console.error("❌ Connection error:", error);    padding: 10,
+
+      throw error;    backgroundColor: 'white',
+
+    }    borderRadius: 4,
+
+  };    fontFamily: 'monospace',
+
+  },
+
+  // Disconnect from device  notificationList: {
+
+  const disconnectFromDevice = async () => {    maxHeight: 150,
+
+    if (connectedDevice) {    marginTop: 8,
+
+      try {    backgroundColor: 'white',
+
+        await bleManager.cancelDeviceConnection(connectedDevice.id);    borderRadius: 4,
+
+        setConnectedDevice(null);    padding: 10,
+
+      } catch (error) {  },
+
+        console.error("Disconnect error:", error);  notification: {
+
+      }    fontSize: 12,
+
+    }    marginVertical: 2,
+
+  };    fontFamily: 'monospace',
+
+  },
+
+  // Get services and characteristics of connected device  noOps: {
+
+  const getServicesAndCharacteristics = async (forceRediscover = false): Promise<ServiceInfo[]> => {    textAlign: 'center',
+
+    if (!connectedDevice) {    color: '#999',
+
+      throw new Error("No device connected");    fontStyle: 'italic',
+
+    }  },
+
+});
+
+    try {
+
+      console.log("📡 Checking device connection status...");const {
+
+      // Check if device is still connected  // ...existing code...
+
+      const isConnected = await connectedDevice.isConnected();  readCharacteristic,
+
+      console.log("Connection status:", isConnected);  writeCharacteristic,
+
+        subscribeToCharacteristic,
+
+      if (!isConnected) {} = useBLE();
+
+        throw new Error("Device is not connected anymore");
+
+      }{/* Services and Characteristics */}
+
+{services.length > 0 && (
+
+      // If force rediscover, do it again  <View style={styles.servicesContainer}>
+
+      if (forceRediscover) {    <Text style={styles.servicesTitle}>
+
+        console.log("🔄 Forcing service rediscovery...");      📡 Services ({services.length})
+
+        await connectedDevice.discoverAllServicesAndCharacteristics();    </Text>
+
+        await new Promise(resolve => setTimeout(resolve, 1000));    <ScrollView style={styles.servicesList}>
+
+      }      {services.map((service, serviceIndex) => (
+
+        <View key={serviceIndex} style={styles.serviceItem}>
+
+      console.log("📋 Fetching services...");          <Text style={styles.serviceUuid}>
+
+      const services = await connectedDevice.services();            Service: {service.uuid}
+
+      console.log(`Found ${services.length} service(s)`);          </Text>
+
+                <Text style={styles.charCount}>
+
+      if (services.length === 0) {            {service.characteristics.length} characteristic(s)
+
+        console.warn("⚠️ No BLE services found on this device");          </Text>
+
+        return [];          
+
+      }          {/* Mostrar cada característica com seus controles */}
+
+          {service.characteristics.map((char, charIndex) => (
+
+      const servicesWithCharacteristics = await Promise.all(            <CharacteristicTest
+
+        services.map(async (service) => {              key={charIndex}
+
+          console.log(`  Service UUID: ${service.uuid}`);              serviceUUID={service.uuid}
+
+          const characteristics = await service.characteristics();              characteristicUUID={char.uuid}
+
+          console.log(`    - ${characteristics.length} characteristic(s)`);              isReadable={char.isReadable}
+
+                        isWritable={char.isWritableWithResponse || char.isWritableWithoutResponse}
+
+          return {              isNotifiable={char.isNotifiable}
+
+            uuid: service.uuid,              onRead={readCharacteristic}
+
+            characteristics: characteristics.map((char) => {              onWrite={writeCharacteristic}
+
+              console.log(`      Char UUID: ${char.uuid}`);              onSubscribe={subscribeToCharacteristic}
+
+              console.log(`        Read: ${char.isReadable}, Write: ${char.isWritableWithResponse || char.isWritableWithoutResponse}, Notify: ${char.isNotifiable}`);            />
+
+              return {          ))}
+
+                uuid: char.uuid,        </View>
+
+                isReadable: char.isReadable,      ))}
+
+                isWritableWithResponse: char.isWritableWithResponse,    </ScrollView>
+
+                isWritableWithoutResponse: char.isWritableWithoutResponse,  </View>
+
+                isNotifiable: char.isNotifiable,)}
+
+                isIndicatable: char.isIndicatable,
+              };
+            }),
+          };
+        })
+      );
+      
+      console.log("✅ Services discovery complete");
+      return servicesWithCharacteristics;
+    } catch (error) {
+      console.error("❌ Get services error:", error);
+      throw error;
+    }
+  };
+
+  // Read from a characteristic
+  const readCharacteristic = async (
+    serviceUUID: string,
+    characteristicUUID: string
+  ): Promise<string> => {
+    if (!connectedDevice) {
+      throw new Error("No device connected");
+    }
+
+    try {
+      console.log(`📖 Reading characteristic ${characteristicUUID}...`);
+      
+      const characteristic = await connectedDevice.readCharacteristicForService(
+        serviceUUID,
+        characteristicUUID
+      );
+
+      if (characteristic.value) {
+        const decodedValue = Buffer.from(characteristic.value, "base64").toString(
+          "utf-8"
+        );
+        console.log(`✅ Read value: ${decodedValue}`);
+        return decodedValue;
+      }
+      
+      return "";
+    } catch (error) {
+      console.error("❌ Read characteristic error:", error);
+      throw error;
+    }
+  };
+
+  // Write to a characteristic
+  const writeCharacteristic = async (
+    serviceUUID: string,
+    characteristicUUID: string,
+    value: string,
+    withResponse: boolean = true
+  ): Promise<void> => {
+    if (!connectedDevice) {
+      throw new Error("No device connected");
+    }
+
+    try {
+      console.log(`✍️ Writing to characteristic ${characteristicUUID}...`);
+      console.log(`Value: ${value}`);
+      
+      const encodedValue = Buffer.from(value, "utf-8").toString("base64");
+      
+      if (withResponse) {
+        await connectedDevice.writeCharacteristicWithResponseForService(
+          serviceUUID,
+          characteristicUUID,
+          encodedValue
+        );
+      } else {
+        await connectedDevice.writeCharacteristicWithoutResponseForService(
+          serviceUUID,
+          characteristicUUID,
+          encodedValue
+        );
+      }
+      
+      console.log("✅ Write successful");
+    } catch (error) {
+      console.error("❌ Write characteristic error:", error);
+      throw error;
+    }
+  };
+
+  // Subscribe to characteristic notifications
+  const subscribeToCharacteristic = async (
+    serviceUUID: string,
+    characteristicUUID: string,
+    callback: (value: string) => void
+  ): Promise<Subscription> => {
+    if (!connectedDevice) {
+      throw new Error("No device connected");
+    }
+
+    try {
+      console.log(`🔔 Subscribing to characteristic ${characteristicUUID}...`);
+      
+      const subscription = connectedDevice.monitorCharacteristicForService(
+        serviceUUID,
+        characteristicUUID,
+        (error, characteristic) => {
+          if (error) {
+            console.error("❌ Notification error:", error);
+            return;
+          }
+
+          if (characteristic?.value) {
+            const decodedValue = Buffer.from(characteristic.value, "base64").toString(
+              "utf-8"
+            );
+            console.log(`🔔 Notification received: ${decodedValue}`);
+            callback(decodedValue);
+          }
+        }
+      );
+
+      console.log("✅ Subscription active");
+      return subscription;
+    } catch (error) {
+      console.error("❌ Subscribe error:", error);
+      throw error;
+    }
+  };
+
+  return {
+    // State
+    allDevices,
+    connectedDevice,
+    isScanning,
+    bluetoothState,
+    
+    // Methods
+    scanForDevices,
+    stopScanning,
+    connectToDevice,
+    disconnectFromDevice,
+    getServicesAndCharacteristics,
+    readCharacteristic,
+    writeCharacteristic,
+    subscribeToCharacteristic,
+    requestPermissions,
+  };
+}
+
+export default useBLE;

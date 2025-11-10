@@ -11,6 +11,7 @@ import {
 } from "react-native";
 import useBLE from "@/hooks/useBLE";
 import { State } from "react-native-ble-plx";
+import { CharacteristicTest } from "./CharacteristicTest";
 
 export default function BLEScreen() {
   const {
@@ -23,6 +24,9 @@ export default function BLEScreen() {
     connectToDevice,
     disconnectFromDevice,
     getServicesAndCharacteristics,
+    readCharacteristic,
+    writeCharacteristic,
+    subscribeToCharacteristic,
   } = useBLE();
 
   const [services, setServices] = useState<any[]>([]);
@@ -38,7 +42,17 @@ export default function BLEScreen() {
   const handleConnect = async (device: any) => {
     try {
       console.log("🔵 Attempting to connect to:", device.name, device.id);
-      const connectedDev = await connectToDevice(device);
+      
+      // Show loading state
+      const connectedDev = await connectToDevice(device).catch((error) => {
+        console.error("Connection error:", error);
+        throw new Error(error.message || "Failed to establish connection");
+      });
+      
+      if (!connectedDev) {
+        throw new Error("Connection returned null");
+      }
+      
       console.log("✅ Connected successfully!");
       
       // Wait longer for the device to be fully ready (especially for audio devices)
@@ -62,7 +76,7 @@ export default function BLEScreen() {
             await new Promise(resolve => setTimeout(resolve, 2000));
           }
         } catch (serviceError: any) {
-          console.error(`❌ Attempt ${attempts} failed:`, serviceError.message);
+          console.error(`❌ Attempt ${attempts} failed:`, serviceError?.message || serviceError);
           if (attempts < maxAttempts) {
             await new Promise(resolve => setTimeout(resolve, 2000));
           }
@@ -85,7 +99,11 @@ export default function BLEScreen() {
       }
     } catch (error: any) {
       console.error("❌ Connection failed:", error);
-      Alert.alert("Error", `Failed to connect: ${error.message || "Unknown error"}`);
+      const errorMessage = error?.message || error?.toString() || "Unknown error occurred";
+      Alert.alert(
+        "Connection Failed", 
+        errorMessage + "\n\nTips:\n• Make sure device is not connected to another phone\n• Try turning Bluetooth off and on\n• Move closer to the device"
+      );
     }
   };
 
@@ -136,24 +154,23 @@ export default function BLEScreen() {
     </TouchableOpacity>
   );
 
-  const renderService = (service: any) => (
+  const renderService = (service: any, serviceIndex: number) => (
     <View key={service.uuid} style={styles.serviceContainer}>
       <Text style={styles.serviceTitle}>Service: {service.uuid}</Text>
-      {service.characteristics.map((char: any) => (
-        <View key={char.uuid} style={styles.characteristicContainer}>
-          <Text style={styles.characteristicText}>Char: {char.uuid}</Text>
-          <View style={styles.propertiesContainer}>
-            {char.isReadable && (
-              <Text style={styles.propertyBadge}>Read</Text>
-            )}
-            {char.isWritableWithResponse && (
-              <Text style={styles.propertyBadge}>Write</Text>
-            )}
-            {char.isNotifiable && (
-              <Text style={styles.propertyBadge}>Notify</Text>
-            )}
-          </View>
-        </View>
+      <Text style={styles.charCount}>{service.characteristics.length} characteristic(s)</Text>
+      
+      {service.characteristics.map((char: any, charIndex: number) => (
+        <CharacteristicTest
+          key={char.uuid}
+          serviceUUID={service.uuid}
+          characteristicUUID={char.uuid}
+          isReadable={char.isReadable}
+          isWritable={char.isWritableWithResponse || char.isWritableWithoutResponse}
+          isNotifiable={char.isNotifiable}
+          onRead={readCharacteristic}
+          onWrite={writeCharacteristic}
+          onSubscribe={subscribeToCharacteristic}
+        />
       ))}
     </View>
   );
@@ -220,7 +237,7 @@ export default function BLEScreen() {
           {services.length > 0 ? (
             <ScrollView style={styles.servicesScrollView}>
               <Text style={styles.servicesTitle}>Services & Characteristics:</Text>
-              {services.map(renderService)}
+              {services.map((service, index) => renderService(service, index))}
             </ScrollView>
           ) : (
             <View style={styles.noServicesContainer}>
@@ -405,6 +422,11 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "600",
     color: "#2196F3",
+    marginBottom: 8,
+  },
+  charCount: {
+    fontSize: 11,
+    color: "#666",
     marginBottom: 8,
   },
   characteristicContainer: {

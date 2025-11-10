@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { PermissionsAndroid, Platform } from "react-native";
-import { BleManager, Device, State } from "react-native-ble-plx";
+import { BleManager, Device, State, Subscription } from "react-native-ble-plx";
 import * as ExpoDevice from "expo-device";
 import { Buffer } from "buffer";
 
@@ -9,6 +9,22 @@ interface BLEDevice {
   id: string;
   name: string | null;
   rssi: number | null;
+}
+
+// Characteristic Info interface
+interface CharacteristicInfo {
+  uuid: string;
+  isReadable: boolean;
+  isWritableWithResponse: boolean;
+  isWritableWithoutResponse: boolean;
+  isNotifiable: boolean;
+  isIndicatable: boolean;
+}
+
+// Service Info interface
+interface ServiceInfo {
+  uuid: string;
+  characteristics: CharacteristicInfo[];
 }
 
 const bleManager = new BleManager();
@@ -151,32 +167,60 @@ function useBLE() {
   const connectToDevice = async (device: BLEDevice) => {
     try {
       console.log("🔌 Connecting to device:", device.id);
-      const deviceConnection = await bleManager.connectToDevice(device.id, {
-        requestMTU: 517, // Request larger MTU for better performance
-      });
-      console.log("✓ Device connected");
       
+      // Stop any ongoing scan before connecting
+      bleManager.stopDeviceScan();
+      
+      const deviceConnection = await bleManager.connectToDevice(device.id, {
+        requestMTU: 517,
+        timeout: 10000, // 10 second timeout
+      }).catch((error) => {
+        console.error("Connection failed:", error);
+        // Throw a more descriptive error
+        if (error.message?.includes("Device disconnected") || error.message?.includes("Connection")) {
+          throw new Error("Failed to connect. Device may be out of range or already connected to another device.");
+        }
+        throw new Error(`Connection failed: ${error.message || "Unknown error"}`);
+      });
+      
+      console.log("✓ Device connected");
       setConnectedDevice(deviceConnection);
       
       console.log("🔍 Discovering services and characteristics...");
       // Add a small delay before discovery to ensure device is ready
       await new Promise(resolve => setTimeout(resolve, 500));
-      await deviceConnection.discoverAllServicesAndCharacteristics();
-      console.log("✓ Discovery complete");
+      
+      try {
+        await deviceConnection.discoverAllServicesAndCharacteristics();
+        console.log("✓ Discovery complete");
+      } catch (discoveryError) {
+        console.warn("⚠️ Service discovery failed:", discoveryError);
+        // Continue anyway, we can try to get services later
+      }
       
       // Monitor disconnection
-      bleManager.onDeviceDisconnected(device.id, (error, disconnectedDevice) => {
-        if (error) {
-          console.error("Disconnection error:", error);
+      const disconnectSubscription = bleManager.onDeviceDisconnected(
+        device.id, 
+        (error, disconnectedDevice) => {
+          if (error) {
+            console.error("Disconnection error:", error);
+          }
+          console.log("Device disconnected:", disconnectedDevice?.name);
+          setConnectedDevice(null);
         }
-        console.log("Device disconnected:", disconnectedDevice?.name);
-        setConnectedDevice(null);
-      });
+      );
 
       return deviceConnection;
-    } catch (error) {
+    } catch (error: any) {
       console.error("❌ Connection error:", error);
-      throw error;
+      setConnectedDevice(null);
+      
+      // Ensure we throw a proper Error object with message
+      if (error instanceof Error) {
+        throw error;
+      } else {
+        throw new Error(error?.message || "Failed to connect to device");
+      }
     }
   };
 
@@ -184,11 +228,33 @@ function useBLE() {
   const disconnectFromDevice = async () => {
     if (connectedDevice) {
       try {
+        console.log("🔌 Disconnecting from device:", connectedDevice.id);
         await bleManager.cancelDeviceConnection(connectedDevice.id);
         setConnectedDevice(null);
-      } catch (error) {
+        console.log("✅ Disconnected successfully");
+      } catch (error: any) {
         console.error("Disconnect error:", error);
+        // Force clear the state even if disconnect fails
+        setConnectedDevice(null);
       }
+    }
+  };
+
+  // Clean up and cancel all connections
+  const cleanup = async () => {
+    try {
+      console.log("🧹 Cleaning up BLE connections...");
+      bleManager.stopDeviceScan();
+      
+      if (connectedDevice) {
+        await bleManager.cancelDeviceConnection(connectedDevice.id);
+      }
+      
+      setConnectedDevice(null);
+      setIsScanning(false);
+      console.log("✅ Cleanup complete");
+    } catch (error) {
+      console.error("Cleanup error:", error);
     }
   };
 
@@ -196,25 +262,28 @@ function useBLE() {
   const readCharacteristic = async (
     serviceUUID: string,
     characteristicUUID: string
-  ) => {
+  ): Promise<string> => {
     if (!connectedDevice) {
       throw new Error("No device connected");
     }
 
     try {
+      console.log(`📖 Reading characteristic ${characteristicUUID}...`);
+      
       const characteristic = await connectedDevice.readCharacteristicForService(
         serviceUUID,
         characteristicUUID
       );
 
       if (characteristic.value) {
-        const decodedValue = Buffer.from(characteristic.value, "base64").toString(
-          "utf-8"
-        );
+        const decodedValue = Buffer.from(characteristic.value, "base64").toString("utf-8");
+        console.log(`✅ Read value: ${decodedValue}`);
         return decodedValue;
       }
+      
+      return "";
     } catch (error) {
-      console.error("Read characteristic error:", error);
+      console.error("❌ Read characteristic error:", error);
       throw error;
     }
   };
@@ -223,57 +292,82 @@ function useBLE() {
   const writeCharacteristic = async (
     serviceUUID: string,
     characteristicUUID: string,
-    value: string
-  ) => {
+    value: string,
+    withResponse: boolean = true
+  ): Promise<void> => {
     if (!connectedDevice) {
       throw new Error("No device connected");
     }
 
     try {
+      console.log(`✍️ Writing to characteristic ${characteristicUUID}...`);
+      console.log(`Value: ${value}`);
+      
       const encodedValue = Buffer.from(value, "utf-8").toString("base64");
-      await connectedDevice.writeCharacteristicWithResponseForService(
-        serviceUUID,
-        characteristicUUID,
-        encodedValue
-      );
-      return true;
+      
+      if (withResponse) {
+        await connectedDevice.writeCharacteristicWithResponseForService(
+          serviceUUID,
+          characteristicUUID,
+          encodedValue
+        );
+      } else {
+        await connectedDevice.writeCharacteristicWithoutResponseForService(
+          serviceUUID,
+          characteristicUUID,
+          encodedValue
+        );
+      }
+      
+      console.log("✅ Write successful");
     } catch (error) {
-      console.error("Write characteristic error:", error);
+      console.error("❌ Write characteristic error:", error);
       throw error;
     }
   };
 
   // Subscribe to characteristic notifications
-  const subscribeToCharacteristic = (
+  const subscribeToCharacteristic = async (
     serviceUUID: string,
     characteristicUUID: string,
     callback: (value: string) => void
-  ) => {
+  ): Promise<Subscription> => {
     if (!connectedDevice) {
       throw new Error("No device connected");
     }
 
-    connectedDevice.monitorCharacteristicForService(
-      serviceUUID,
-      characteristicUUID,
-      (error, characteristic) => {
-        if (error) {
-          console.error("Monitor error:", error);
-          return;
-        }
+    try {
+      console.log(`🔔 Subscribing to characteristic ${characteristicUUID}...`);
+      
+      const subscription = connectedDevice.monitorCharacteristicForService(
+        serviceUUID,
+        characteristicUUID,
+        (error, characteristic) => {
+          if (error) {
+            console.error("❌ Notification error:", error);
+            return;
+          }
 
-        if (characteristic?.value) {
-          const decodedValue = Buffer.from(characteristic.value, "base64").toString(
-            "utf-8"
-          );
-          callback(decodedValue);
+          if (characteristic?.value) {
+            const decodedValue = Buffer.from(characteristic.value, "base64").toString(
+              "utf-8"
+            );
+            console.log(`🔔 Notification received: ${decodedValue}`);
+            callback(decodedValue);
+          }
         }
-      }
-    );
+      );
+
+      console.log("✅ Subscription active");
+      return subscription;
+    } catch (error) {
+      console.error("❌ Subscribe error:", error);
+      throw error;
+    }
   };
 
   // Get services and characteristics of connected device
-  const getServicesAndCharacteristics = async (forceRediscover = false) => {
+  const getServicesAndCharacteristics = async (forceRediscover = false): Promise<ServiceInfo[]> => {
     if (!connectedDevice) {
       throw new Error("No device connected");
     }
@@ -314,12 +408,14 @@ function useBLE() {
             uuid: service.uuid,
             characteristics: characteristics.map((char) => {
               console.log(`      Char UUID: ${char.uuid}`);
+              console.log(`        Read: ${char.isReadable}, Write: ${char.isWritableWithResponse || char.isWritableWithoutResponse}, Notify: ${char.isNotifiable}`);
               return {
                 uuid: char.uuid,
                 isReadable: char.isReadable,
                 isWritableWithResponse: char.isWritableWithResponse,
                 isWritableWithoutResponse: char.isWritableWithoutResponse,
                 isNotifiable: char.isNotifiable,
+                isIndicatable: char.isIndicatable,
               };
             }),
           };
@@ -351,6 +447,7 @@ function useBLE() {
     subscribeToCharacteristic,
     getServicesAndCharacteristics,
     requestPermissions,
+    cleanup,
   };
 }
 
