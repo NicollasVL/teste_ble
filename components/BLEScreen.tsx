@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useCallback } from "react";
 import {
   View,
   Text,
@@ -13,8 +13,9 @@ import useBLE from "@/hooks/useBLE";
 import { State } from "react-native-ble-plx";
 import { CharacteristicTest } from "./CharacteristicTest";
 import { PTorkControlPanel } from "./PTorkControlPanel";
+import PTorkControlPanelSimple from "./PTorkControlPanelSimple";
 
-export default function BLEScreen() {
+function BLEScreen() {
   const {
     allDevices,
     connectedDevice,
@@ -198,11 +199,18 @@ export default function BLEScreen() {
 
       {/* Connected Device Info */}
       {connectedDevice && (
-        <View style={styles.connectedDeviceContainer}>
-          <Text style={styles.connectedDeviceTitle}>Connected Device</Text>
-          <Text style={styles.connectedDeviceName}>
-            {connectedDevice.name || connectedDevice.id}
-          </Text>
+        <ScrollView 
+          style={styles.connectedDeviceScrollView}
+          contentContainerStyle={styles.connectedDeviceContent}
+          showsVerticalScrollIndicator={true}
+        >
+          <View style={styles.connectedDeviceHeader}>
+            <Text style={styles.connectedDeviceTitle}>Connected Device</Text>
+            <Text style={styles.connectedDeviceName}>
+              {connectedDevice.name || connectedDevice.id}
+            </Text>
+          </View>
+          
           <View style={styles.buttonRow}>
             <TouchableOpacity
               style={styles.disconnectButton}
@@ -234,14 +242,9 @@ export default function BLEScreen() {
             </TouchableOpacity>
           </View>
 
-          {/* P TORK Control Panel - SEMPRE MOSTRA PARA TESTE */}
+          {/* P TORK Control Panel */}
           <View style={styles.controlPanelContainer}>
-            <Text style={styles.controlPanelTitle}>🎮 Painel de Controle P TORK</Text>
-            <Text style={{padding: 10, color: '#666'}}>
-              Device: {connectedDevice.name || 'Sem nome'} | 
-              ID: {connectedDevice.id.substring(0, 8)}...
-            </Text>
-            <PTorkControlPanel
+            <PTorkControlPanelSimple
               device={connectedDevice}
               onRead={readCharacteristic}
               onWrite={writeCharacteristic}
@@ -288,7 +291,7 @@ export default function BLEScreen() {
               )}
             </>
           )}
-        </View>
+        </ScrollView>
       )}
 
       {/* Scan Button */}
@@ -334,6 +337,8 @@ export default function BLEScreen() {
     </View>
   );
 }
+
+export default React.memo(BLEScreen);
 
 const styles = StyleSheet.create({
   container: {
@@ -554,11 +559,26 @@ const styles = StyleSheet.create({
     fontSize: 14,
     marginTop: 32,
   },
+  connectedDeviceScrollView: {
+    flex: 1,
+  },
+  connectedDeviceContent: {
+    paddingBottom: 20,
+  },
+  connectedDeviceHeader: {
+    backgroundColor: "#fff",
+    padding: 15,
+    borderRadius: 10,
+    marginBottom: 10,
+  },
   controlPanelContainer: {
-    marginTop: 20,
+    marginTop: 10,
+    marginBottom: 10,
     backgroundColor: "#fff",
     borderRadius: 10,
     padding: 15,
+    borderWidth: 3,
+    borderColor: "#007AFF",
   },
   controlPanelTitle: {
     fontSize: 20,

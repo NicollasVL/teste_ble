@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { PermissionsAndroid, Platform } from "react-native";
 import { BleManager, Device, State, Subscription } from "react-native-ble-plx";
 import * as ExpoDevice from "expo-device";
@@ -259,7 +259,7 @@ function useBLE() {
   };
 
   // Read from a characteristic
-  const readCharacteristic = async (
+  const readCharacteristic = useCallback(async (
     serviceUUID: string,
     characteristicUUID: string
   ): Promise<string> => {
@@ -286,13 +286,13 @@ function useBLE() {
       console.error("❌ Read characteristic error:", error);
       throw error;
     }
-  };
+  }, [connectedDevice]);
 
   // Write to a characteristic
-  const writeCharacteristic = async (
+  const writeCharacteristic = useCallback(async (
     serviceUUID: string,
     characteristicUUID: string,
-    value: string,
+    value: string, // Agora recebe base64 diretamente
     withResponse: boolean = true
   ): Promise<void> => {
     if (!connectedDevice) {
@@ -300,34 +300,47 @@ function useBLE() {
     }
 
     try {
-      console.log(`✍️ Writing to characteristic ${characteristicUUID}...`);
-      console.log(`Value: ${value}`);
+      console.log(`📤 WRITE DEBUG:`);
+      console.log(`   Service: ${serviceUUID}`);
+      console.log(`   Characteristic: ${characteristicUUID}`);
+      console.log(`   Value (base64): ${value}`);
+      console.log(`   With response: ${withResponse}`);
       
-      const encodedValue = Buffer.from(value, "utf-8").toString("base64");
+      // Decodificar base64 para ver bytes originais (apenas debug)
+      try {
+        const binaryString = atob(value);
+        const bytes = [];
+        for (let i = 0; i < binaryString.length; i++) {
+          bytes.push(binaryString.charCodeAt(i));
+        }
+        console.log(`   Bytes: [${bytes.join(', ')}]`);
+      } catch (e) {
+        console.log(`   Não foi possível decodificar bytes para debug`);
+      }
       
       if (withResponse) {
         await connectedDevice.writeCharacteristicWithResponseForService(
           serviceUUID,
           characteristicUUID,
-          encodedValue
+          value // Já está em base64
         );
       } else {
         await connectedDevice.writeCharacteristicWithoutResponseForService(
           serviceUUID,
           characteristicUUID,
-          encodedValue
+          value
         );
       }
       
-      console.log("✅ Write successful");
+      console.log(`✅ Write completed`);
     } catch (error) {
       console.error("❌ Write characteristic error:", error);
       throw error;
     }
-  };
+  }, [connectedDevice]);
 
   // Subscribe to characteristic notifications
-  const subscribeToCharacteristic = async (
+  const subscribeToCharacteristic = useCallback(async (
     serviceUUID: string,
     characteristicUUID: string,
     callback: (value: string) => void
@@ -352,7 +365,7 @@ function useBLE() {
             const decodedValue = Buffer.from(characteristic.value, "base64").toString(
               "utf-8"
             );
-            console.log(`🔔 Notification received: ${decodedValue}`);
+            // NÃO fazer log aqui - dispositivo envia dados continuamente
             callback(decodedValue);
           }
         }
@@ -364,7 +377,7 @@ function useBLE() {
       console.error("❌ Subscribe error:", error);
       throw error;
     }
-  };
+  }, [connectedDevice]);
 
   // Get services and characteristics of connected device
   const getServicesAndCharacteristics = async (forceRediscover = false): Promise<ServiceInfo[]> => {
