@@ -216,5 +216,52 @@ export const P_TORK_CONFIG = {
   },
 };
 
+/**
+ * Configuração para G PEDAL B (mesmo protocolo que P TORK)
+ */
+export const G_PEDAL_CONFIG = {
+  // Serviços (mesmos do P TORK)
+  services: {
+    main: MAIN_SERVICE_UUID,
+    genericAccess: GENERIC_ACCESS_SERVICE,
+    deviceInfo: DEVICE_INFO_SERVICE,
+  },
+  
+  // Características principais (mesmas do P TORK)
+  characteristics: {
+    mainData: MAIN_DATA_CHAR,
+    deviceName: DEVICE_NAME_CHAR,
+    modelNumber: MODEL_NUMBER_CHAR,
+    serialNumber: SERIAL_NUMBER_CHAR,
+    firmware: FIRMWARE_CHAR,
+    hardware: HARDWARE_CHAR,
+    software: SOFTWARE_CHAR,
+    manufacturer: MANUFACTURER_CHAR,
+  },
+  
+  // Filtros para scan
+  scanFilter: {
+    name: 'G PEDAL B',
+    namePrefix: 'G PEDAL',
+  },
+  
+  // Valores padrão
+  defaults: {
+    scanTimeout: 10000,
+    connectionTimeout: 10000,
+    mtu: 517,
+  },
+};
+
+/**
+ * Detecta qual configuração usar baseado no nome do dispositivo
+ */
+export function getDeviceConfig(deviceName: string) {
+  if (deviceName?.includes('G PEDAL')) {
+    return G_PEDAL_CONFIG;
+  }
+  return P_TORK_CONFIG;
+}
+
 // Exportação default
 export default P_TORK_CONFIG;

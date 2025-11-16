@@ -6,7 +6,7 @@ import React, { useState, useCallback } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Alert } from 'react-native';
 import { Device } from 'react-native-ble-plx';
 import MapConverter from '../utils/MapConverter';
-import P_TORK_CONFIG from '../constants/PTorkUUIDs';
+import { getDeviceConfig } from '../constants/PTorkUUIDs';
 
 // Contador global para debug
 let globalCallCount = 0;
@@ -30,27 +30,58 @@ interface PTorkControlPanelSimpleProps {
 // ============================================
 
 /**
- * Cria array de bytes exatamente como no C#
+ * Protocolo específico para G PEDAL B
+ * USA APENAS 1 BYTE ASCII (sem o zero extra)
+ * Mapa 0 = '0' (48), Mapa 1 = '1' (49), etc.
+ */
+const createGpedalBCommand = (mapNumber: number): number[] => {
+  // G PEDAL B aceita APENAS 1 byte ASCII (descoberto no teste)
+  const asciiNumber = 48 + mapNumber; // '0' = 48, '1' = 49, etc.
+  console.log(`🎯 G PEDAL B: Mapa ${mapNumber} → ASCII '${String.fromCharCode(asciiNumber)}' (byte ${asciiNumber})`);
+  return [asciiNumber]; // APENAS 1 BYTE!
+};
+
+/**
+ * Protocolo para P TORK (original)
  * byte[] bt = new byte[2]; bt[0] = value1;
  */
-const createByteArray = (mapNumber: number): number[] => {
+const createPtorkCommand = (mapNumber: number): number[] => {
   const pedalByte = MapConverter.GtoP(mapNumber);
   return [pedalByte, 0]; // Exatamente como no C#: byte[2] com segundo elemento 0
 };
 
 /**
- * Converte array de bytes para base64 (formato que o BLE plugin espera)
+ * Função universal de criação de comando
+ * Detecta o dispositivo e usa o protocolo correto
+ */
+const createCommandForDevice = (mapNumber: number, deviceName: string | null): number[] => {
+  if (deviceName?.includes('G PEDAL')) {
+    console.log(`🎯 Criando comando G PEDAL B para mapa ${mapNumber}`);
+    return createGpedalBCommand(mapNumber);
+  } else {
+    console.log(`🎯 Criando comando P TORK para mapa ${mapNumber}`);
+    return createPtorkCommand(mapNumber);
+  }
+};
+
+/**
+ * Converte array de bytes para base64 (compatível com React Native)
  */
 const bytesToBase64 = (bytes: number[]): string => {
   // Criar Uint8Array a partir dos bytes
   const uint8Array = new Uint8Array(bytes);
+  
   // Converter para string binária
   let binaryString = '';
   uint8Array.forEach(byte => {
     binaryString += String.fromCharCode(byte);
   });
-  // Converter para base64
-  return btoa(binaryString);
+  
+  // Converter para base64 usando btoa (nativo do JavaScript)
+  const base64 = btoa(binaryString);
+  console.log(`🔤 Conversão base64: [${bytes.join(', ')}] → "${base64}"`);
+  
+  return base64;
 };
 
 export const PTorkControlPanelSimple: React.FC<PTorkControlPanelSimpleProps> = ({
@@ -62,6 +93,17 @@ export const PTorkControlPanelSimple: React.FC<PTorkControlPanelSimpleProps> = (
   const renderCount = React.useRef(0);
   renderCount.current++;
   console.log(`🔄 PTorkControlPanelSimple RENDER #${renderCount.current}`);
+  
+  // Detectar configuração baseada no nome do dispositivo
+  const DEVICE_CONFIG = React.useMemo(() => {
+    const config = getDeviceConfig(device.name || '');
+    console.log('📱 Configuração detectada:', {
+      deviceName: device.name,
+      serviceUUID: config.services.main,
+      charUUID: config.characteristics.mainData
+    });
+    return config;
+  }, [device.name]);
   
   const [selectedMap, setSelectedMap] = useState<number>(0);
   const [loading, setLoading] = useState(false);
@@ -106,8 +148,8 @@ export const PTorkControlPanelSimple: React.FC<PTorkControlPanelSimpleProps> = (
       
       // Subscrever primeiro
       await onSubscribeRef.current(
-        P_TORK_CONFIG.services.main,
-        P_TORK_CONFIG.characteristics.mainData,
+        DEVICE_CONFIG.services.main,
+        DEVICE_CONFIG.characteristics.mainData,
         (value) => {
           handleDataReceived(value);
         }
@@ -118,8 +160,8 @@ export const PTorkControlPanelSimple: React.FC<PTorkControlPanelSimpleProps> = (
       console.log('📤 Enviando byte inicial 115 (0x73) para ativar comunicação...');
       const initData = bytesToBase64([115, 0]);
       await onWriteRef.current(
-        P_TORK_CONFIG.services.main,
-        P_TORK_CONFIG.characteristics.mainData,
+        DEVICE_CONFIG.services.main,
+        DEVICE_CONFIG.characteristics.mainData,
         initData,
         false // SEM esperar resposta
       );
@@ -136,15 +178,27 @@ export const PTorkControlPanelSimple: React.FC<PTorkControlPanelSimpleProps> = (
 
   const handleDataReceived = useCallback((value: string) => {
     try {
+      console.log('📥 handleDataReceived CHAMADO! Valor recebido:', value);
+      
       // Converter string para bytes
       const bytes: number[] = [];
       for (let i = 0; i < value.length; i++) {
         bytes.push(value.charCodeAt(i));
       }
       
+      console.log('📥 Bytes extraídos:', bytes);
+      
       // Atualizar dados recebidos apenas se mudou
       const newData = bytes.join(', ');
       setLastReceivedData(prev => prev !== newData ? newData : prev);
+      
+      console.log('🔍 PROCESSANDO DADOS RECEBIDOS:', {
+        bytes,
+        firstByte: bytes[0],
+        firstByteHex: '0x' + bytes[0].toString(16).toUpperCase(),
+        firstByteChar: String.fromCharCode(bytes[0]),
+        currentMap: currentMapRef.current
+      });
       
       // Processar cada byte recebido COM DEBOUNCE
       if (bytes.length > 0) {
@@ -161,6 +215,12 @@ export const PTorkControlPanelSimple: React.FC<PTorkControlPanelSimpleProps> = (
           const letter = String.fromCharCode(firstByte);
           mapNumber = MapConverter.PtoGInputLetter(letter);
           console.log(`🔤 Recebeu letra '${letter}' (byte ${firstByte}) → mapa ${mapNumber}`);
+        }
+        // Verificar se é um NÚMERO ASCII de mapa (ASCII 48-54 = '0'-'6') - G PEDAL B
+        else if (firstByte >= 48 && firstByte <= 54) {
+          const numberChar = String.fromCharCode(firstByte);
+          mapNumber = parseInt(numberChar, 10);
+          console.log(`🔢 Recebeu número '${numberChar}' (byte ${firstByte}) → mapa ${mapNumber}`);
         }
         
         // Se identificou um mapa, atualizar com DEBOUNCE
@@ -184,6 +244,47 @@ export const PTorkControlPanelSimple: React.FC<PTorkControlPanelSimpleProps> = (
   }, []); // SEM dependências - função nunca muda
 
   const handleChangeMap = useCallback(async (mapNumber: number) => {
+    console.log(`\n🚀 handleChangeMap chamado para mapa ${mapNumber}`);
+    
+    // Para G PEDAL B: APENAS 1 byte ASCII (como no teste que funciona)
+    if (device.name?.includes('G PEDAL')) {
+      console.log('🎯 G PEDAL B detectado - Protocolo ASCII 1 byte');
+      
+      try {
+        const byteArray = createGpedalBCommand(mapNumber); // Retorna [48-54]
+        const base64Data = bytesToBase64(byteArray);
+        
+        console.log('📤 G PEDAL B:', {
+          mapa: mapNumber,
+          ascii: String.fromCharCode(byteArray[0]),
+          byte: byteArray[0],
+          base64: base64Data
+        });
+        
+        await onWriteRef.current(
+          DEVICE_CONFIG.services.main,
+          DEVICE_CONFIG.characteristics.mainData,
+          base64Data,
+          false
+        );
+        
+        // Delay pequeno
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        console.log('✅ Comando G PEDAL B enviado!');
+        
+      } catch (error: any) {
+        console.error('❌ Erro G PEDAL B:', error);
+        Alert.alert('Erro', `Não foi possível trocar o mapa: ${error.message}`);
+      }
+      
+      return; // SAIR - não executar a lógica do P TORK
+    }
+    
+    // ==============================================
+    // DAQUI PRA BAIXO: Lógica do P TORK (com bloqueios)
+    // ==============================================
+    
     // VERIFICAR TRAVA GLOBAL PRIMEIRO
     if (GLOBAL_LOCK) {
       console.error('⛔ SISTEMA BLOQUEADO POR LOOP - Recarregue o app');
@@ -240,21 +341,35 @@ export const PTorkControlPanelSimple: React.FC<PTorkControlPanelSimpleProps> = (
     console.log(`[${callId}] 🔒 BLOQUEIOS ATIVADOS: isExecuting=true, loading=true`);
     
     try {
-      // 1. Criar array de bytes (igual ao C#)
-      const byteArray = createByteArray(mapNumber);
-      console.log(`[${callId}] 📝 Bytes para envio: [${byteArray.join(', ')}] (0x${byteArray[0].toString(16).toUpperCase()}, 0x${byteArray[1].toString(16).toUpperCase()})`);
+      // 1. Criar comando ESPECÍFICO para o dispositivo
+      const byteArray = createCommandForDevice(mapNumber, device.name);
+      console.log(`[${callId}] 📝 Bytes para ${device.name}: [${byteArray.join(', ')}]`);
+      console.log(`[${callId}] 🔍 Primeiro byte: ${byteArray[0]} (0x${byteArray[0].toString(16).toUpperCase()})`);
       
       // 2. Converter para base64
       const base64Data = bytesToBase64(byteArray);
       console.log(`[${callId}] 📡 Dados em base64: ${base64Data}`);
-      console.log(`[${callId}] 🔍 Chamando onWriteRef.current...`);
       
+      // 3. DEBUG: Log completo do comando
+      console.log(`[${callId}] 🎯 DETALHES DO COMANDO:`, {
+        device: device.name,
+        mapNumber,
+        bytes: byteArray,
+        firstByte: byteArray[0],
+        firstByteHex: '0x' + byteArray[0].toString(16).toUpperCase(),
+        firstByteChar: String.fromCharCode(byteArray[0]),
+        base64: base64Data,
+        serviceUUID: DEVICE_CONFIG.services.main,
+        charUUID: DEVICE_CONFIG.characteristics.mainData
+      });
+      
+      console.log(`[${callId}] 🔍 Chamando onWriteRef.current...`);
       const startTime = Date.now();
       
       // TIMEOUT ABSOLUTO: Se não responder em 10 segundos, cancela TUDO
       const writePromise = onWriteRef.current(
-        P_TORK_CONFIG.services.main,
-        P_TORK_CONFIG.characteristics.mainData,
+        DEVICE_CONFIG.services.main,
+        DEVICE_CONFIG.characteristics.mainData,
         base64Data,
         false // SEM ESPERAR RESPOSTA - como no C#
       );
@@ -296,7 +411,7 @@ export const PTorkControlPanelSimple: React.FC<PTorkControlPanelSimpleProps> = (
       console.log(`[${callId}] 🔓 DESBLOQUEADO: isExecuting=false, loading=false`);
       console.log(`====================================================\n`);
     }
-  }, []); // SEM DEPENDÊNCIAS - função nunca muda!
+  }, [device.name]); // Adicionar device.name como dependência
 
   const renderMapButton = (mapNumber: number) => {
     const mapInfo = MapConverter.getMapInfo(mapNumber);
@@ -332,7 +447,9 @@ export const PTorkControlPanelSimple: React.FC<PTorkControlPanelSimpleProps> = (
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>🎮 P TORK Control</Text>
+      <Text style={styles.title}>
+        🎮 {device.name?.includes('G PEDAL') ? 'G PEDAL' : 'P TORK'} Control
+      </Text>
       
       {loading && (
         <View style={styles.loadingIndicator}>
@@ -394,8 +511,8 @@ export const PTorkControlPanelSimple: React.FC<PTorkControlPanelSimpleProps> = (
             console.log('🧪 TESTE: Enviando byte 115 (0x73)');
             const testData = bytesToBase64([115, 0]);
             await onWriteRef.current(
-              P_TORK_CONFIG.services.main,
-              P_TORK_CONFIG.characteristics.mainData,
+              DEVICE_CONFIG.services.main,
+              DEVICE_CONFIG.characteristics.mainData,
               testData,
               false // SEM esperar resposta
             );
@@ -408,14 +525,222 @@ export const PTorkControlPanelSimple: React.FC<PTorkControlPanelSimpleProps> = (
         <Text style={styles.testButtonText}>🧪 Teste Comunicação</Text>
       </TouchableOpacity>
 
+      {device.name?.includes('G PEDAL') && (
+        <>
+          <TouchableOpacity
+            style={styles.gpedalTestButton}
+            onPress={async () => {
+              try {
+                console.log('🧪 TESTE G PEDAL B: Enviando mapa 1 (ASCII \'1\')');
+                const testCommand = createGpedalBCommand(1); // Retorna [49] = '1'
+                const testData = bytesToBase64(testCommand);
+                
+                console.log('🔍 Comando de teste:', {
+                  mapa: 1,
+                  bytes: testCommand,
+                  ascii: String.fromCharCode(testCommand[0]),
+                  byte: testCommand[0],
+                  base64: testData
+                });
+                
+                await onWriteRef.current(
+                  DEVICE_CONFIG.services.main,
+                  DEVICE_CONFIG.characteristics.mainData,
+                  testData,
+                  false
+                );
+                
+                await new Promise(resolve => setTimeout(resolve, 500));
+                
+                // Ler resposta
+                const resp = await onReadRef.current(
+                  DEVICE_CONFIG.services.main,
+                  DEVICE_CONFIG.characteristics.mainData
+                );
+                
+                console.log(`📥 Resposta: '${resp}' (byte ${resp.charCodeAt(0)})`);
+                Alert.alert('✅', `Comando enviado!\nResposta: '${resp}'`);
+              } catch (error: any) {
+                Alert.alert('❌', `Falha: ${error.message}`);
+              }
+            }}
+          >
+            <Text style={styles.gpedalTestButtonText}>🎯 Teste G PEDAL B (Mapa 1)</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.gpedalTestButton}
+            onPress={async () => {
+              try {
+                console.log('\n🔍 ANÁLISE DETALHADA DO G PEDAL B:');
+                console.log('='.repeat(60));
+                
+                // 1. Estado inicial
+                console.log('\n📖 1. LENDO ESTADO INICIAL:');
+                const initial = await onReadRef.current(DEVICE_CONFIG.services.main, DEVICE_CONFIG.characteristics.mainData);
+                console.log(`   Estado: '${initial}' = byte ${initial.charCodeAt(0)} (0x${initial.charCodeAt(0).toString(16)})`);
+                
+                // 2. Testar comandos SEM o byte zero (ASCII puro)
+                console.log('\n📤 2. TESTANDO COMANDOS ASCII PUROS (1 byte):');
+                
+                const singleByteTests = [
+                  { name: 'ASCII 0', byte: 48, desc: 'Caractere \'0\'' },
+                  { name: 'ASCII 1', byte: 49, desc: 'Caractere \'1\'' },
+                  { name: 'ASCII 2', byte: 50, desc: 'Caractere \'2\'' },
+                ];
+                
+                for (const test of singleByteTests) {
+                  console.log(`\n   🔹 Enviando ${test.name} (${test.desc}):`);
+                  console.log(`      Byte: ${test.byte} (0x${test.byte.toString(16)})`);
+                  
+                  // ENVIAR APENAS 1 BYTE (sem o zero extra)
+                  const data = bytesToBase64([test.byte]);
+                  console.log(`      Base64: ${data}`);
+                  
+                  await onWriteRef.current(DEVICE_CONFIG.services.main, DEVICE_CONFIG.characteristics.mainData, data, false);
+                  await new Promise(resolve => setTimeout(resolve, 800));
+                  
+                  const resp = await onReadRef.current(DEVICE_CONFIG.services.main, DEVICE_CONFIG.characteristics.mainData);
+                  const respByte = resp.charCodeAt(0);
+                  console.log(`      📥 Resposta: '${resp}' = byte ${respByte} (0x${respByte.toString(16)})`);
+                  
+                  if (respByte !== 48) {
+                    console.log(`      ✅ MUDOU! Era '0'(48), agora é '${resp}'(${respByte})`);
+                    Alert.alert('🎉 SUCESSO!', `Comando ${test.name} funcionou!\nMudou para: '${resp}'`);
+                    return;
+                  } else {
+                    console.log(`      ❌ Não mudou (ainda '0')`);
+                  }
+                }
+                
+                // 3. Testar comandos com DOIS bytes (protocolo P TORK)
+                console.log('\n📤 3. TESTANDO COMANDOS DE 2 BYTES (P TORK):');
+                
+                const doubleByteTests = [
+                  { name: 'Mapa 1', bytes: [21, 0], desc: 'Byte 21 + zero' },
+                  { name: 'Mapa 2', bytes: [22, 0], desc: 'Byte 22 + zero' },
+                ];
+                
+                for (const test of doubleByteTests) {
+                  console.log(`\n   🔹 Enviando ${test.name} (${test.desc}):`);
+                  console.log(`      Bytes: [${test.bytes.join(', ')}]`);
+                  
+                  const data = bytesToBase64(test.bytes);
+                  console.log(`      Base64: ${data}`);
+                  
+                  await onWriteRef.current(DEVICE_CONFIG.services.main, DEVICE_CONFIG.characteristics.mainData, data, false);
+                  await new Promise(resolve => setTimeout(resolve, 800));
+                  
+                  const resp = await onReadRef.current(DEVICE_CONFIG.services.main, DEVICE_CONFIG.characteristics.mainData);
+                  const respByte = resp.charCodeAt(0);
+                  console.log(`      📥 Resposta: '${resp}' = byte ${respByte} (0x${respByte.toString(16)})`);
+                  
+                  if (respByte !== 48) {
+                    console.log(`      ✅ MUDOU! Era '0'(48), agora é '${resp}'(${respByte})`);
+                    Alert.alert('🎉 SUCESSO!', `Comando ${test.name} funcionou!\nMudou para: '${resp}'`);
+                    return;
+                  } else {
+                    console.log(`      ❌ Não mudou (ainda '0')`);
+                  }
+                }
+                
+                // 4. Resumo
+                console.log('\n' + '='.repeat(60));
+                console.log('📊 RESUMO:');
+                console.log('   ❌ Nenhum comando alterou o estado do dispositivo');
+                console.log('   🔒 Dispositivo permanece TRAVADO no mapa 0');
+                console.log('   💡 Possíveis causas:');
+                console.log('      - Dispositivo em modo somente leitura');
+                console.log('      - Precisa de comando de desbloqueio primeiro');
+                console.log('      - Protocolo completamente diferente do P TORK');
+                console.log('      - Hardware fisicamente bloqueado');
+                console.log('='.repeat(60));
+                
+                Alert.alert('⚠️ Dispositivo Bloqueado', 
+                  'Nenhum comando funcionou.\n\n' +
+                  'O G PEDAL B está TRAVADO no mapa 0.\n\n' +
+                  'Verifique os logs para detalhes.');
+                
+              } catch (error: any) {
+                console.error('❌ Erro:', error);
+                Alert.alert('❌', `Erro: ${error.message}`);
+              }
+            }}
+          >
+            <Text style={styles.gpedalTestButtonText}>🔍 Análise Completa</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.gpedalTestButton}
+            onPress={async () => {
+              try {
+                console.log('\n🔬 TESTE DE TODOS OS PROTOCOLOS COM LEITURA:');
+                
+                // Protocolo 1: Byte 20-26 (P TORK) - MAPA 0
+                console.log('\n📤 Tentativa 1: Byte 20 (0x14) - Protocolo P TORK Mapa 0');
+                const test1 = bytesToBase64([20, 0]);
+                await onWriteRef.current(DEVICE_CONFIG.services.main, DEVICE_CONFIG.characteristics.mainData, test1, false);
+                await new Promise(resolve => setTimeout(resolve, 500));
+                
+                // LER RESPOSTA
+                const resp1 = await onReadRef.current(DEVICE_CONFIG.services.main, DEVICE_CONFIG.characteristics.mainData);
+                console.log('📥 Resposta 1:', {
+                  raw: resp1,
+                  bytes: Array.from(resp1).map(c => c.charCodeAt(0)),
+                  chars: resp1.split('').map(c => `'${c}'(${c.charCodeAt(0)})`)
+                });
+                
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                
+                // Protocolo 2: Byte 21 (Mapa 1)
+                console.log('\n📤 Tentativa 2: Byte 21 (0x15) - Protocolo P TORK Mapa 1');
+                const test2 = bytesToBase64([21, 0]);
+                await onWriteRef.current(DEVICE_CONFIG.services.main, DEVICE_CONFIG.characteristics.mainData, test2, false);
+                await new Promise(resolve => setTimeout(resolve, 500));
+                
+                const resp2 = await onReadRef.current(DEVICE_CONFIG.services.main, DEVICE_CONFIG.characteristics.mainData);
+                console.log('📥 Resposta 2:', {
+                  raw: resp2,
+                  bytes: Array.from(resp2).map(c => c.charCodeAt(0)),
+                  chars: resp2.split('').map(c => `'${c}'(${c.charCodeAt(0)})`)
+                });
+                
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                
+                // Protocolo 3: ASCII '0' e '1'
+                console.log('\n📤 Tentativa 3: Byte 48 (0x30) - ASCII \'0\'');
+                const test3 = bytesToBase64([48, 0]);
+                await onWriteRef.current(DEVICE_CONFIG.services.main, DEVICE_CONFIG.characteristics.mainData, test3, false);
+                await new Promise(resolve => setTimeout(resolve, 500));
+                
+                const resp3 = await onReadRef.current(DEVICE_CONFIG.services.main, DEVICE_CONFIG.characteristics.mainData);
+                console.log('📥 Resposta 3:', {
+                  raw: resp3,
+                  bytes: Array.from(resp3).map(c => c.charCodeAt(0)),
+                  chars: resp3.split('').map(c => `'${c}'(${c.charCodeAt(0)})`)
+                });
+                
+                console.log('\n✅ Todos os testes concluídos! Analise as respostas acima.');
+                Alert.alert('✅', 'Testes concluídos!\nVerifique os logs para ver as respostas.');
+              } catch (error: any) {
+                console.error('❌ Erro nos testes:', error);
+                Alert.alert('❌', `Erro: ${error.message}`);
+              }
+            }}
+          >
+            <Text style={styles.gpedalTestButtonText}>🔬 Testar Protocolos</Text>
+          </TouchableOpacity>
+        </>
+      )}
+
       <TouchableOpacity
         style={styles.readButton}
         onPress={async () => {
           try {
             console.log('🔍 Lendo dados...');
             const value = await onReadRef.current(
-              P_TORK_CONFIG.services.main,
-              P_TORK_CONFIG.characteristics.mainData
+              DEVICE_CONFIG.services.main,
+              DEVICE_CONFIG.characteristics.mainData
             );
             
             const bytes: number[] = [];
@@ -574,6 +899,18 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   testButtonText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: 'bold',
+  },
+  gpedalTestButton: {
+    backgroundColor: '#FF6B35',
+    padding: 10,
+    borderRadius: 8,
+    alignItems: 'center',
+    marginTop: 8,
+  },
+  gpedalTestButtonText: {
     color: '#fff',
     fontSize: 13,
     fontWeight: 'bold',

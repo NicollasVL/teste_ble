@@ -92,6 +92,27 @@ function BLEScreen() {
       
       if (deviceServices.length > 0) {
         console.log("Services details:", JSON.stringify(deviceServices, null, 2));
+        
+        // LOG DETALHADO: Mostrar TODOS os UUIDs para ajudar a identificar o G PEDAL
+        console.log('\n🔍 ========== ANÁLISE COMPLETA DE SERVIÇOS ==========');
+        console.log(`📱 Dispositivo: ${device.name || device.id}`);
+        console.log(`📊 Total de serviços: ${deviceServices.length}\n`);
+        
+        deviceServices.forEach((service, idx) => {
+          console.log(`\n📍 Serviço ${idx + 1}:`);
+          console.log(`   UUID: ${service.uuid}`);
+          console.log(`   Características: ${service.characteristics.length}`);
+          
+          service.characteristics.forEach((char: any, charIdx: number) => {
+            console.log(`   \n   ├─ Característica ${charIdx + 1}:`);
+            console.log(`   │  UUID: ${char.uuid}`);
+            console.log(`   │  Read: ${char.isReadable ? '✅' : '❌'}`);
+            console.log(`   │  Write: ${char.isWritableWithResponse || char.isWritableWithoutResponse ? '✅' : '❌'}`);
+            console.log(`   │  Notify: ${char.isNotifiable ? '✅' : '❌'}`);
+          });
+        });
+        console.log('\n🔍 ===================================================\n');
+        
         setServices(deviceServices);
         Alert.alert(
           "Success", 
@@ -255,12 +276,15 @@ function BLEScreen() {
           {/* Services List - Sempre mostra também */}
           {(() => {
             const deviceName = connectedDevice.name || '';
-            const isPTork = deviceName.includes('P TORK') || deviceName.includes('TORK');
-            console.log('🎮 Check P TORK:', { 
+            const isPTork = deviceName.includes('P TORK') || 
+                           deviceName.includes('TORK') || 
+                           deviceName.includes('G PEDAL');
+            console.log('🎮 Check Device:', { 
               deviceName, 
               isPTork,
               includes_P_TORK: deviceName.includes('P TORK'),
-              includes_TORK: deviceName.includes('TORK')
+              includes_TORK: deviceName.includes('TORK'),
+              includes_G_PEDAL: deviceName.includes('G PEDAL')
             });
             return isPTork;
           })() ? null : (
